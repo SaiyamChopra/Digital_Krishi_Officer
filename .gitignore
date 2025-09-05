@@ -1,0 +1,30 @@
+# Security - Never commit sensitive files
+secrets.toml
+config.js
+.env
+*.key
+
+# Node modules (if using Node.js)
+node_modules/
+
+# Build outputs
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+*.tmp
