@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import WhatsAppChat from './WhatsAppChat';
 
 const Navbar = ({ activeTab, onTabChange }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -9,9 +10,16 @@ const Navbar = ({ activeTab, onTabChange }) => {
     { id: 'home', icon: 'fas fa-home', label: translate('home') },
     { id: 'chat', icon: 'fas fa-comments', label: translate('chat') },
     { id: 'weather', icon: 'fas fa-cloud-sun', label: translate('weather') },
+    { id: 'market', icon: 'fas fa-chart-line', label: translate('market') },
     { id: 'records', icon: 'fas fa-clipboard-list', label: translate('records') },
     { id: 'settings', icon: 'fas fa-cog', label: translate('settings') }
   ];
+
+  const renderWhatsAppButton = () => (
+    <li className="nav-item">
+      <WhatsAppChat />
+    </li>
+  );
 
   const handleTabChange = (tabId) => {
     onTabChange(tabId);
@@ -29,7 +37,7 @@ const Navbar = ({ activeTab, onTabChange }) => {
         {translate('appTitle')}
       </div>
 
-      <button 
+      <button
         className="mobile-menu-toggle"
         onClick={toggleMobileMenu}
         aria-label="Toggle mobile menu"
@@ -49,6 +57,7 @@ const Navbar = ({ activeTab, onTabChange }) => {
             </button>
           </li>
         ))}
+        {renderWhatsAppButton()}
       </ul>
     </nav>
   );

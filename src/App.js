@@ -1,18 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
-import { useLanguage } from './contexts/LanguageContext';
 import Navbar from './components/Navbar';
 import Home from './components/Home';
 import Chat from './components/Chat';
 import Weather from './components/Weather';
+import Market from './components/Market';
 import Records from './components/Records';
 import Settings from './components/Settings';
 import LoadingOverlay from './components/LoadingOverlay';
-
+import '@fortawesome/fontawesome-free/css/all.min.css';
 function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isLoading, setIsLoading] = useState(false);
-  const { translate } = useLanguage();
 
   // API Configuration
   const [config, setConfig] = useState({
@@ -21,12 +20,10 @@ function App() {
     location: { lat: null, lon: null, city: '' }
   });
 
-  useEffect(() => {
-    loadApiKeys();
-    getUserLocation();
-  }, []);
+  // Selected location for chatbot (can be different from GPS location)
+  const [selectedLocation, setSelectedLocation] = useState(null);
 
-  const loadApiKeys = () => {
+  const loadApiKeys = useCallback(() => {
     const storedKeys = localStorage.getItem('apiKeys');
     if (storedKeys) {
       const keys = JSON.parse(storedKeys);
@@ -36,12 +33,12 @@ function App() {
         weatherApiKey: keys.weather || ''
       }));
     }
-    
+
     // Log API key status
     console.log('API Key Status:');
     console.log('Gemini API Key:', config.geminiApiKey ? 'Loaded ✓' : 'Missing ✗');
     console.log('Weather API Key:', config.weatherApiKey ? 'Loaded ✓' : 'Missing ✗');
-    
+
     if (!config.geminiApiKey) {
       console.log('⚠️ Gemini API key not found.');
       console.log('To add your API key, run: setGeminiKey("your-api-key-here")');
@@ -50,7 +47,12 @@ function App() {
       console.log('⚠️ Weather API key not found.');
       console.log('To add your API key, run: setWeatherKey("your-api-key-here")');
     }
-  };
+  }, [config.geminiApiKey, config.weatherApiKey]);
+
+  useEffect(() => {
+    loadApiKeys();
+    getUserLocation();
+  }, [loadApiKeys]);
 
   const getUserLocation = () => {
     if (navigator.geolocation) {
@@ -88,6 +90,11 @@ function App() {
     localStorage.setItem('apiKeys', JSON.stringify(updatedKeys));
   };
 
+  const handleLocationChange = (newLocation) => {
+    setSelectedLocation(newLocation);
+    console.log('Location changed to:', newLocation);
+  };
+
   // Global functions for API key management (accessible from console)
   useEffect(() => {
     window.setGeminiKey = (key) => {
@@ -108,7 +115,7 @@ function App() {
 
     window.testApiKeys = async () => {
       console.log('🔍 Testing API connectivity...');
-      
+
       // Test Gemini API
       if (config.geminiApiKey) {
         try {
@@ -119,7 +126,7 @@ function App() {
               contents: [{ parts: [{ text: 'Hello' }] }]
             })
           });
-          
+
           if (response.ok) {
             console.log('✅ Gemini API: Connected successfully');
           } else {
@@ -138,7 +145,7 @@ function App() {
           const response = await fetch(
             `https://api.openweathermap.org/data/2.5/weather?lat=${config.location.lat}&lon=${config.location.lon}&appid=${config.weatherApiKey}`
           );
-          
+
           if (response.ok) {
             console.log('✅ Weather API: Connected successfully');
           } else {
@@ -165,13 +172,15 @@ function App() {
       case 'home':
         return <Home onTabChange={setActiveTab} />;
       case 'chat':
-        return <Chat config={config} setIsLoading={setIsLoading} />;
+        return <Chat config={config} selectedLocation={selectedLocation} setIsLoading={setIsLoading} />;
       case 'weather':
-        return <Weather config={config} />;
+        return <Weather config={config} onLocationChange={handleLocationChange} />;
+      case 'market':
+        return <Market />;
       case 'records':
         return <Records />;
       case 'settings':
-        return <Settings config={config} updateApiKeys={updateApiKeys} />;
+        return <Settings config={config} />;
       default:
         return <Home onTabChange={setActiveTab} />;
     }

@@ -1,40 +1,130 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { weatherAPI } from '../services/apiService';
+import './Weather.css';
 
-const Weather = ({ config }) => {
+const Weather = ({ config, onLocationChange }) => {
   const { translate } = useLanguage();
   const [weatherData, setWeatherData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [manualLocation, setManualLocation] = useState('');
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [locationError, setLocationError] = useState(null);
 
   useEffect(() => {
     fetchWeatherData();
-  }, [config]);
+  }, [config]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchWeatherData = async () => {
-    if (!config.weatherApiKey || !config.location.lat) {
-      setError('Weather API key or location not available');
+    if (!config.location.lat || !config.location.lon) {
+      setError('Location not available. Please enable location access or enter location manually.');
       setLoading(false);
       return;
     }
 
     try {
-      const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${config.location.lat}&lon=${config.location.lon}&appid=${config.weatherApiKey}&units=metric`
-      );
-
-      if (!response.ok) {
-        throw new Error(`Weather API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      setWeatherData(data);
+      const response = await weatherAPI.getCurrent(config.location.lat, config.location.lon);
+      setWeatherData(response.data);
       setError(null);
     } catch (err) {
-      setError(err.message);
+      console.error('Weather API error:', err);
+      setError(err.response?.data?.message || 'Failed to fetch weather data. Please check backend configuration.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchWeatherByCity = async (cityName) => {
+    if (!cityName.trim()) {
+      setLocationError('Please enter a city name');
+      return;
+    }
+
+    setLoading(true);
+    setLocationError(null);
+
+    try {
+      console.log('Fetching weather for city:', cityName.trim());
+      const response = await weatherAPI.getByCity(cityName.trim());
+      console.log('Weather API response:', response);
+
+      setWeatherData(response.data);
+      setError(null);
+      setShowManualInput(false);
+      setManualLocation(''); // Clear the input field
+
+      // Store the selected location and notify parent component
+      const newLocation = {
+        city: response.data.city,
+        country: response.data.country,
+        lat: null, // We don't have coordinates for city-based search
+        lon: null,
+        isManual: true,
+        manualCity: cityName.trim()
+      };
+      if (onLocationChange) {
+        onLocationChange(newLocation);
+      }
+    } catch (err) {
+      console.error('Weather API error:', err);
+      setLocationError(err.response?.data?.message || 'City not found. Please check the spelling and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getCurrentLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError('Geolocation is not supported by this browser.');
+      return;
+    }
+
+    setLoading(true);
+    setLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+
+          const response = await weatherAPI.getCurrent(lat, lon);
+          setWeatherData(response.data);
+          setError(null);
+          setShowManualInput(false);
+
+          // Store the current location and notify parent component
+          const newLocation = {
+            city: response.data.city,
+            country: response.data.country,
+            lat: lat,
+            lon: lon,
+            isManual: false,
+            manualCity: null
+          };
+          if (onLocationChange) {
+            onLocationChange(newLocation);
+          }
+        } catch (err) {
+          console.error('Weather API error:', err);
+          setLocationError('Failed to fetch weather data for current location.');
+        } finally {
+          setLoading(false);
+        }
+      },
+      (error) => {
+        console.error('Geolocation error:', error);
+        setLocationError('Unable to get your current location. Please enter a city name manually.');
+        setLoading(false);
+      }
+    );
+  };
+
+  const handleManualLocationSubmit = (e) => {
+    e.preventDefault();
+    console.log('Form submitted with city:', manualLocation);
+    fetchWeatherByCity(manualLocation);
   };
 
   if (loading) {
@@ -69,15 +159,75 @@ const Weather = ({ config }) => {
           <div className="text-center p-4">
             <i className="fas fa-exclamation-triangle fa-2x text-muted"></i>
             <p className="mt-2 text-muted">
-              Weather data unavailable. Please configure your Weather API key.
+              {error || 'Weather data unavailable. Please check backend configuration.'}
             </p>
-            <button 
-              onClick={fetchWeatherData}
-              className="btn btn-primary mt-2"
-            >
-              <i className="fas fa-refresh"></i>
-              Retry
-            </button>
+
+            {!showManualInput ? (
+              <div className="mt-3">
+                <button
+                  onClick={() => setShowManualInput(true)}
+                  className="btn btn-primary me-2"
+                >
+                  <i className="fas fa-map-marker-alt"></i>
+                  Enter Location Manually
+                </button>
+                <button
+                  onClick={fetchWeatherData}
+                  className="btn btn-secondary"
+                >
+                  <i className="fas fa-refresh"></i>
+                  Retry GPS
+                </button>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <form onSubmit={handleManualLocationSubmit} className="manual-location-form">
+                  <div className="form-group">
+                    <label className="form-label">Enter City Name:</label>
+                    <div className="input-group">
+                      <input
+                        type="text"
+                        value={manualLocation}
+                        onChange={(e) => setManualLocation(e.target.value)}
+                        placeholder="e.g., Mumbai, Delhi, Bangalore"
+                        className="form-input"
+                        required
+                      />
+                      <button type="submit" className="btn btn-primary">
+                        <i className="fas fa-search"></i>
+                        Get Weather
+                      </button>
+                    </div>
+                    {locationError && (
+                      <div className="text-danger mt-1">
+                        <small>{locationError}</small>
+                      </div>
+                    )}
+                  </div>
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      onClick={getCurrentLocation}
+                      className="btn btn-success"
+                    >
+                      <i className="fas fa-map-marker-alt"></i>
+                      Use Current Location
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowManualInput(false);
+                        setLocationError(null);
+                        setManualLocation('');
+                      }}
+                      className="btn btn-secondary"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -88,41 +238,104 @@ const Weather = ({ config }) => {
     <div className="container">
       <div className="card">
         <div className="card-header">
-          <h2>
-            <i className="fas fa-cloud-sun"></i>
-            {translate('currentWeather')}
-          </h2>
+          <div className="weather-header">
+            <h2>
+              <i className="fas fa-cloud-sun"></i>
+              {translate('currentWeather')}
+            </h2>
+            <button
+              onClick={() => setShowManualInput(true)}
+              className="btn btn-outline-primary btn-sm"
+              title="Change Location"
+            >
+              <i className="fas fa-map-marker-alt"></i>
+              Change Location
+            </button>
+          </div>
         </div>
 
         {weatherData && (
           <div className="p-4">
+            {showManualInput && (
+              <div className="manual-location-overlay">
+                <div className="manual-location-form">
+                  <h4><i className="fas fa-map-marker-alt"></i> Change Location</h4>
+                  <form onSubmit={handleManualLocationSubmit}>
+                    <div className="form-group">
+                      <label className="form-label">Enter City Name:</label>
+                      <div className="input-group">
+                        <input
+                          type="text"
+                          value={manualLocation}
+                          onChange={(e) => setManualLocation(e.target.value)}
+                          placeholder="e.g., Mumbai, Delhi, Bangalore"
+                          className="form-input"
+                          required
+                        />
+                        <button type="submit" className="btn btn-primary">
+                          <i className="fas fa-search"></i>
+                          Get Weather
+                        </button>
+                      </div>
+                      {locationError && (
+                        <div className="text-danger mt-1">
+                          <small>{locationError}</small>
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-actions">
+                      <button
+                        type="button"
+                        onClick={getCurrentLocation}
+                        className="btn btn-success"
+                      >
+                        <i className="fas fa-map-marker-alt"></i>
+                        Use Current Location
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowManualInput(false);
+                          setLocationError(null);
+                          setManualLocation('');
+                        }}
+                        className="btn btn-secondary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-2">
               <div className="weather-main">
-                <h3 className="text-center mb-3">{weatherData.name}</h3>
+                <h3 className="text-center mb-3">{weatherData.city}</h3>
                 <div className="text-center">
                   <div className="weather-icon">
-                    <img 
-                      src={`https://openweathermap.org/img/wn/${weatherData.weather[0].icon}@2x.png`}
-                      alt={weatherData.weather[0].description}
+                    <img
+                      src={`https://openweathermap.org/img/wn/${weatherData.icon}@2x.png`}
+                      alt={weatherData.description}
                     />
                   </div>
-                  <h1 className="temperature">{Math.round(weatherData.main.temp)}°C</h1>
-                  <p className="weather-description">{weatherData.weather[0].description}</p>
+                  <h1 className="temperature">{Math.round(weatherData.temperature)}°C</h1>
+                  <p className="weather-description">{weatherData.description}</p>
                 </div>
               </div>
 
               <div className="weather-details">
                 <div className="weather-item">
                   <i className="fas fa-thermometer-half"></i>
-                  <span>Feels like: {Math.round(weatherData.main.feels_like)}°C</span>
+                  <span>Feels like: {Math.round(weatherData.feels_like)}°C</span>
                 </div>
                 <div className="weather-item">
                   <i className="fas fa-tint"></i>
-                  <span>{translate('humidity')}: {weatherData.main.humidity}%</span>
+                  <span>{translate('humidity')}: {weatherData.humidity}%</span>
                 </div>
                 <div className="weather-item">
                   <i className="fas fa-wind"></i>
-                  <span>{translate('windSpeed')}: {weatherData.wind.speed} m/s</span>
+                  <span>{translate('windSpeed')}: {weatherData.wind_speed} m/s</span>
                 </div>
                 <div className="weather-item">
                   <i className="fas fa-eye"></i>
@@ -130,7 +343,7 @@ const Weather = ({ config }) => {
                 </div>
                 <div className="weather-item">
                   <i className="fas fa-compress-arrows-alt"></i>
-                  <span>Pressure: {weatherData.main.pressure} hPa</span>
+                  <span>Pressure: {weatherData.pressure} hPa</span>
                 </div>
               </div>
             </div>
@@ -154,10 +367,10 @@ const Weather = ({ config }) => {
 };
 
 const getFarmingAdvice = (weather) => {
-  const temp = weather.main.temp;
-  const humidity = weather.main.humidity;
-  const windSpeed = weather.wind.speed;
-  const condition = weather.weather[0].main.toLowerCase();
+  const temp = weather.temperature;
+  const humidity = weather.humidity;
+  const windSpeed = weather.wind_speed;
+  const condition = weather.description.toLowerCase();
 
   const advice = [];
 

@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { chatAPI, enhancedChatAPI } from '../services/apiService';
+import MarkdownRenderer from './MarkdownRenderer';
 import './Chat.css';
 
-const Chat = ({ config, setIsLoading }) => {
+const Chat = ({ config, selectedLocation, setIsLoading }) => {
   const { translate, currentLanguage } = useLanguage();
   const [messages, setMessages] = useState([
     {
@@ -23,26 +25,26 @@ const Chat = ({ config, setIsLoading }) => {
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       const recognitionInstance = new SpeechRecognition();
-      
+
       recognitionInstance.continuous = false;
       recognitionInstance.interimResults = false;
       recognitionInstance.lang = getLanguageCode(currentLanguage);
-      
+
       recognitionInstance.onresult = (event) => {
         const transcript = event.results[0][0].transcript;
         setInputMessage(transcript);
         setIsListening(false);
       };
-      
+
       recognitionInstance.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
         setIsListening(false);
       };
-      
+
       recognitionInstance.onend = () => {
         setIsListening(false);
       };
-      
+
       setRecognition(recognitionInstance);
     }
   }, [currentLanguage]);
@@ -75,9 +77,10 @@ const Chat = ({ config, setIsLoading }) => {
     setMessages(prev => [...prev, newMessage]);
   };
 
+  // eslint-disable-next-line no-unused-vars
   const buildPrompt = (query, context = {}) => {
     const { location, weather } = context;
-    
+
     let prompt = `You are a Digital Krishi Officer, an AI agricultural advisor. Provide helpful, accurate farming advice in ${currentLanguage === 'hi' ? 'Hindi' : currentLanguage === 'ml' ? 'Malayalam' : 'English'}.
 
 Context:
@@ -93,63 +96,29 @@ Provide practical, actionable advice for farmers. Include specific recommendatio
   };
 
   const callGeminiAPI = async (query, context = {}) => {
-    const prompt = buildPrompt(query, context);
-    
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${config.geminiApiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024,
-          },
-          safetySettings: [
-            {
-              category: "HARM_CATEGORY_HARASSMENT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_HATE_SPEECH",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            },
-            {
-              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-              threshold: "BLOCK_MEDIUM_AND_ABOVE"
-            }
-          ]
-        })
-      });
+      // Use selected location if available, otherwise fall back to GPS location
+      const locationToUse = selectedLocation || config.location;
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-        return data.candidates[0].content.parts[0].text;
-      } else {
-        throw new Error('No response generated from Gemini API');
-      }
+      // Try enhanced chat first
+      const response = await enhancedChatAPI.sendMessage(
+        query,
+        currentLanguage,
+        locationToUse
+      );
+      return response.data.message;
     } catch (error) {
-      console.error('Gemini API error:', error);
-      
-      if (error.message.includes('API key') || error.message.includes('401')) {
-        return `⚠️ API Configuration Required: Please add your Gemini API key using setGeminiKey("your-key") in the browser console to get AI-powered responses. 
+      console.error('Enhanced Chat API error:', error);
+
+      // Fallback to regular chat
+      try {
+        const response = await chatAPI.sendMessage(query, currentLanguage);
+        return response.data.message;
+      } catch (fallbackError) {
+        console.error('Backend API error:', fallbackError);
+
+        if (fallbackError.response?.status === 500 && fallbackError.response?.data?.message?.includes('API key')) {
+          return `⚠️ Backend Configuration Required: Please configure your Gemini API key in the backend environment variables to get AI-powered responses. 
 
 For now, here's some general farming advice:
 - Monitor soil moisture regularly
@@ -157,17 +126,14 @@ For now, here's some general farming advice:
 - Use organic fertilizers when possible
 - Check weather forecasts before major farming activities
 - Maintain proper spacing between plants`;
+        }
+
+        return `I apologize, but I'm having trouble connecting to the AI service right now. Please check your internet connection and try again. In the meantime, consider consulting local agricultural experts or extension services.`;
       }
-      
-      return `I apologize, but I'm having trouble connecting to the AI service right now. Please check your internet connection and try again. In the meantime, consider consulting local agricultural experts or extension services.`;
     }
   };
 
   const analyzeImage = async (imageFile) => {
-    if (!config.geminiApiKey) {
-      return "⚠️ Please configure your Gemini API key to use image analysis features.";
-    }
-
     try {
       // Convert image to base64
       const base64Image = await new Promise((resolve) => {
@@ -179,45 +145,19 @@ For now, here's some general farming advice:
         reader.readAsDataURL(imageFile);
       });
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=${config.geminiApiKey}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                text: `Analyze this agricultural image. Identify any crops, diseases, pests, or farming conditions visible. Provide specific recommendations for improvement, treatment, or best practices. Respond in ${currentLanguage === 'hi' ? 'Hindi' : currentLanguage === 'ml' ? 'Malayalam' : 'English'}.`
-              },
-              {
-                inline_data: {
-                  mime_type: imageFile.type,
-                  data: base64Image
-                }
-              }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.4,
-            topK: 32,
-            topP: 1,
-            maxOutputTokens: 1024,
-          }
-        })
-      });
+      const imageData = {
+        data: base64Image,
+        mimeType: imageFile.type
+      };
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      const response = await enhancedChatAPI.sendMessage(
+        `Analyze this agricultural image. Identify any crops, diseases, pests, or farming conditions visible. Provide specific recommendations for improvement, treatment, or best practices.`,
+        currentLanguage,
+        selectedLocation || config.location,
+        imageData
+      );
 
-      const data = await response.json();
-      
-      if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-        return data.candidates[0].content.parts[0].text;
-      } else {
-        throw new Error('No analysis generated from Gemini Vision API');
-      }
+      return response.data.message;
     } catch (error) {
       console.error('Image analysis error:', error);
       return "I'm having trouble analyzing the image right now. Please ensure you have a stable internet connection and try again.";
@@ -317,7 +257,11 @@ For now, here's some general farming advice:
                   {message.imageUrl && (
                     <img src={message.imageUrl} alt="Uploaded" className="message-image" />
                   )}
-                  <p>{message.content}</p>
+                  {message.type === 'bot' ? (
+                    <MarkdownRenderer content={message.content} />
+                  ) : (
+                    <p>{message.content}</p>
+                  )}
                   <span className="message-time">{formatTimestamp(message.timestamp)}</span>
                 </div>
               </div>
@@ -336,7 +280,7 @@ For now, here's some general farming advice:
                 className="form-input"
                 disabled={isListening}
               />
-              
+
               <button
                 onClick={isListening ? stopListening : startListening}
                 className={`btn btn-icon ${isListening ? 'listening' : ''}`}
@@ -352,7 +296,7 @@ For now, here's some general farming advice:
                 accept="image/*"
                 style={{ display: 'none' }}
               />
-              
+
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="btn btn-icon"
