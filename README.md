@@ -21,6 +21,9 @@ A comprehensive AI-powered agricultural advisory system designed to help farmers
 - **Real-time Weather Integration**: Uses OpenWeather API for current conditions
 - **AI-Powered Responses**: Integrates with Google Gemini API for intelligent responses
 
+###▶️YouTube
+- https://youtu.be/_Frfq4y6iCI?si=BpvqG_PI-svnMTjp
+
 ## Setup Instructions
 
 ### 1. API Keys Configuration
